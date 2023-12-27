@@ -1,0 +1,6 @@
+install.packages('rsconnect')
+rsconnect::setAccountInfo(name='chandranath',
+                          token='21C8E524A08B69CB5B4B2F2A8DBD00B7',
+                          secret='9xket75nUVS6N5mEQlWK3qZf3uVjtXTXTjU6NRWc')
+library(rsconnect)
+rsconnect::deployApp("C:/Users/indra/Desktop/DataVisualization")

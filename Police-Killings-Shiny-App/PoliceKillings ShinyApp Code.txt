@@ -1,0 +1,162 @@
+list.of.packages <- c("ggplot2", "dplyr", "shinythemes", "shiny")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+library(shiny)
+library(shinythemes)
+library(dplyr)
+library(ggplot2)
+
+ 
+police_data <- read.csv('data/police_killings.csv')
+police_data$name <- NULL #exclude name variable since the names are all unique
+police_data$county_id <- as.factor(police_data$county_id)
+police_data$age <- as.numeric(police_data$age)
+police_data$share_white <- as.numeric(police_data$share_white)
+police_data$share_black <- as.numeric(police_data$share_black)
+police_data$share_hispanic <- as.numeric(police_data$share_hispanic)
+police_data$p_income <- as.numeric(police_data$p_income)
+police_data$pov <- as.numeric(police_data$pov)
+police_data$year <- as.factor(police_data$year)
+police_data$county_fp <- as.factor(police_data$county_fp)
+police_data$month <- as.factor(police_data$month)
+police_data$county_bucket <- as.factor(police_data$county_bucket)
+police_data$namelsad <- NULL
+police_data$streetaddress <- NULL
+
+ 
+police_data <- police_data %>%
+  mutate(across(where(is.character), as.factor))
+
+police_data <- police_data %>%
+  select_if(~!(is.factor(.) && nlevels(.) > 10))
+
+not_numeric <- sapply(names(police_data), function(x) !is.numeric(police_data[[x]]))
+data <- police_data
+
+nums <- unlist(lapply(police_data, is.numeric))
+data_num <- police_data[,nums]
+
+old <- theme_set(theme_bw())
+
+ui <- fluidPage(theme = shinytheme("journal"),
+                
+                titlePanel("Police Killings Dataset Explorer"),
+                
+                
+                
+                sidebarPanel(
+                  sliderInput("sampleSize", "Select the size of the sample to plot (n)", min = 1, max = nrow(data),
+                              value = min(1000, nrow(data)), step = nrow(data) / 10, round = 0),
+                  
+                  selectInput("x", "X", c("None", names(data)), names(data)[[2]]),
+                  selectInput("y", "Y", c("None", names(data)), names(data)[[1]]),
+                  
+                  # only allow non-numeric variables for color
+                  selectInput("color", "Color (Filter by level)", c("None", names(data)[not_numeric])),
+                  
+                  p("Jitter and smoothing are used for numeric variables only
+      are selected."),
+                  checkboxInput("jitter", "Jitter"),
+                  checkboxInput("smooth", "Smooth")
+                ),
+                mainPanel(
+                  # Output: Tabset
+                  tabsetPanel(type = "tabs",
+                              tabPanel("Plot", plotOutput("plot")),
+                              tabPanel("Introduction", textOutput("introduction")),
+                              tabPanel("Datasets", textOutput("data_intro")),
+                              tabPanel("Conclusion", textOutput("conclusion"))
+                  )
+                )
+)
+
+server <- function(input, output) {
+  idx <- reactive({
+    if (1 == 1) {
+      1:input$sampleSize
+    } else {
+      set.seed(42)
+      sample(nrow(police_data), input$sampleSize)
+    }
+  })
+  data <- reactive(police_data[idx(), , drop = FALSE])
+
+  plot_type <- reactive({
+    if (input$y != "None")
+      is.numeric(police_data[[input$x]]) + is.numeric(police_data[[input$y]])
+    else
+      -1
+  })
+  
+  output$plot <- renderPlot({
+    if (plot_type() == 2) {
+      plotx <- ggplot(data(), aes_string(x = input$x, y = input$y), color = "steelblue")
+      plotx <- plotx + geom_smooth(method='lm')
+      
+      if (input$jitter)
+        plotx <- plotx + geom_jitter(alpha = 0.5)
+      else
+        plotx <- plotx + geom_point(alpha = 0.5)
+      
+      if (input$smooth)
+        plotx <- plotx + geom_smooth()
+      
+      if (input$color != "None")
+        plotx <- plotx + aes_string(color = input$color)
+    } else if (plot_type() == 1) {
+      plotx <- plotx <- ggplot(data(), aes_string(x = input$x, y = input$y)) + 
+        geom_boxplot()
+      
+      if (input$color != "None")
+        plotx <- plotx + aes_string(fill = input$color)
+    } else if (plot_type() == 0) {
+      datafx <- reactive(data()[, c(input$x, input$y), drop = FALSE] %>%
+                           group_by(across()) %>%
+                           summarize(count = n())
+      )
+      plotx <- ggplot(datafx(), 
+                      mapping = aes_string(x = input$x, y = input$y, fill = "count")) +
+        geom_tile() +
+        scale_fill_gradient(low = "#e7e7fd", high = "#1111dd")
+    } else {
+      plotx <- ggplot(data(), aes_string(x = input$x))
+      
+      if (is.numeric(police_data[[input$x]]))
+        plotx <- plotx + geom_histogram()
+      else
+        plotx <- plotx + geom_bar()
+      
+      if (input$color != "None")
+        plotx <- plotx + aes_string(fill = input$color)
+    }
+    
+    if (plot_type() >= 0) {
+      plotx <- plotx + labs(title = paste(input$y, "vs.", input$x))
+    } else {
+      plotx <- plotx + labs(title = paste("Distribution of", input$x))
+    }
+    
+    plotx <- plotx + 
+      theme_bw() +
+      theme(plot.title = element_text(size = rel(1.8), face = "bold", hjust = 0.5),
+            axis.title = element_text(size = rel(1.5)))
+    
+    print(plotx)
+    
+  }, height=620)
+  
+  output$introduction <- renderText({
+    "In the pursuit of justice and the preservation of public safety, the actions of law enforcement agencies are subject to intense scrutiny and debate. Over recent years, concerns surrounding police fatalities, police-involved killings, and the tragic loss of innocent lives during encounters with the police have become increasingly prominent in public discourse. This project aims to shed light on these critical issues by examining and analyzing data-sets related to police fatalities. It seeks to uncover patterns, trends, and insights that can contribute to a deeper understanding of the complex dynamics surrounding law enforcement interactions and their consequences. Our analysis will delve into various aspects, including the circumstances of police-involved incidents, demographic information of those affected, and the geographic distribution of such events. By doing so, we aim to provide a comprehensive overview of the challenges, disparities, and potential areas for reform within the criminal justice system."
+  })
+  
+  output$data_intro <- renderText({
+    "Police Killings:\n\nThis data set contains information about Americans who were killed by police in 2015.\n\n##### Variables:\n\nAs the previous two data sets this data set contain information of the individual Americans using their age , gender ,time of killing(some information about their identity e.g.name).\n\n##### Source of data: Kaggle\n\n##### Link: <https://www.kaggle.com/datasets/mysarahmadbhat/police-killings/discussion>"
+  })
+  
+  output$conclusion <- renderText({
+    "Conclusion:\n\nAs we navigate through the rich tapestry of data exploring police fatalities, we find ourselves at a crucial intersection of societal challenges and the pursuit of justice. The visualizations and insights presented in this exploration offer a glimpse into the complexities surrounding law enforcement interactions. The patterns observed, such as the age distribution of those affected and the variations across different states, underscore the need for nuanced discussions and targeted reforms within our criminal justice system.\n\nWhile our analysis provides valuable insights, it is essential to recognize that data alone cannot capture the full spectrum of individual stories and systemic issues. This exploration serves as a starting point, inviting further dialogue, research, and action. As we strive for a safer and more equitable society, it is imperative to consider the human stories behind the statistics and work collaboratively towards fostering transparency, accountability, and positive change in policing practices.\n\nThis project encourages ongoing engagement with the data, challenging assumptions, and seeking solutions that address the root causes of disparities. Let this exploration spark conversations that lead to meaningful reforms, contributing to a justice system that reflects the values of fairness, equality, and compassion for all."
+  })
+}
+
+shinyApp(ui = ui, server = server)
